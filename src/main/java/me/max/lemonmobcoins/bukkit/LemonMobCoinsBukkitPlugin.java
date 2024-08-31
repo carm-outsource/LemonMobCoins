@@ -170,7 +170,7 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
                     }
                 }
             };
-            this.saveTask.runTaskTimerAsynchronously(this, interval, interval);
+            this.saveTask.runTaskTimerAsynchronously(this, interval * 20L, interval * 20L);
         }
     }
 
