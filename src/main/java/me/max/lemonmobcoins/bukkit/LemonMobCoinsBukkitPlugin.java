@@ -43,6 +43,7 @@ import ninja.leaping.configurate.yaml.YAMLConfigurationLoader;
 import org.bukkit.Bukkit;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,8 +60,13 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
     private AbstractPluginMessageManager pluginMessageManager;
     private YAMLConfigurationLoader dataLoader;
 
+    private BukkitRunnable saveTask;
+
     @Override
     public void onDisable() {
+
+        shutdownSaveTask();
+
         ConfigurationNode node = null;
         try {
             node = dataLoader.load();
@@ -93,7 +99,7 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
             FileUtil.saveResource("generalConfig.yml", getDataFolder(), "config.yml");
             MessageManager.load(getDataFolder(), getSLF4JLogger());
             dataLoader = YAMLConfigurationLoader.builder().setFile(new File(getDataFolder().toString(), "config.yml"))
-                                                .build();
+                    .build();
             info("Loaded config and files!");
         } catch (IOException e) {
             error("Could not load config and files! Stopping plugin!");
@@ -117,7 +123,7 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
         if (node.getNode("bungeecord").getBoolean()) {
             getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
             getServer().getMessenger()
-                       .registerIncomingPluginChannel(this, "BungeeCord", new PluginMessagingListener(getCoinManager(), getSLF4JLogger()));
+                    .registerIncomingPluginChannel(this, "BungeeCord", new PluginMessagingListener(getCoinManager(), getSLF4JLogger()));
             pluginMessageManager = new BukkitPluginMessageManager(getCoinManager(), getSLF4JLogger());
             registerListeners(new PlayerJoinListener(pluginMessageManager));
         }
@@ -130,6 +136,8 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
         manager.registerCommand(new MStoreCommand(platform, getGuiManager()));
         manager.getCommandReplacements().addReplacement("shopCmd", getGuiManager().getCommand().substring(1));
         info("Loaded commands!");
+
+        startSaveTask(node.getNode("storage", "auto-save").getInt(-1));
     }
 
     private void registerListeners(Listener... listeners) {
@@ -146,6 +154,31 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
 
     private void info(String s) {
         getSLF4JLogger().info(s);
+    }
+
+    public void startSaveTask(int interval) {
+        shutdownSaveTask();
+        if (interval > 0) {
+            this.saveTask = new BukkitRunnable() {
+                @Override
+                public void run() {
+                    try {
+                        getCoinManager().saveData();
+                    } catch (IOException | SQLException e) {
+                        error("Failed to save coins data: " + e.getLocalizedMessage());
+                        e.printStackTrace();
+                    }
+                }
+            };
+            this.saveTask.runTaskTimerAsynchronously(this, interval, interval);
+        }
+    }
+
+    public void shutdownSaveTask() {
+        if (this.saveTask != null) {
+            this.saveTask.cancel();
+            this.saveTask = null;
+        }
     }
 
 
