@@ -41,6 +41,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
@@ -54,6 +55,8 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
     private GuiManager guiManager;
     private PluginMessageManager pluginMessageManager;
 
+    private BukkitRunnable saveTask;
+
     @Override
     public void onEnable() {
         try {
@@ -61,7 +64,7 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
             FileUtil.saveResource("bukkitconfig.yml", getDataFolder(), "config.yml");
             MessageManager.load(getDataFolder(), getLogger());
             info("Loaded config and messages!");
-        } catch (IOException e){
+        } catch (IOException e) {
             error("Could not load config and messages! Stopping plugin!");
             e.printStackTrace();
             Bukkit.getPluginManager().disablePlugin(this);
@@ -72,7 +75,7 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
             String storageType = getConfig().getString("storage.type");
             DataProvider dataProvider;
             if (storageType.equalsIgnoreCase("flatfile")) dataProvider = new YamlBukkitProvider(getDataFolder());
-            else if (storageType.equalsIgnoreCase("mysql")){
+            else if (storageType.equalsIgnoreCase("mysql")) {
                 ConfigurationSection mysqlSection = getConfig().getConfigurationSection("storage.mysql");
                 dataProvider = new MySqlProvider(mysqlSection.getString("hostname"), mysqlSection.getString("port"), mysqlSection.getString("username"), mysqlSection.getString("password"), mysqlSection.getString("database"));
             } else {
@@ -81,12 +84,12 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
             }
             lemonMobCoins = new LemonMobCoins(dataProvider, getLogger());
             guiManager = new GuiManager(getConfig());
-        } catch (SQLException e){
+        } catch (SQLException e) {
             error("Failed loading MySql! Stopping plugin!");
             e.printStackTrace();
             Bukkit.getPluginManager().disablePlugin(this);
             return;
-        } catch (DataLoadException e){
+        } catch (DataLoadException e) {
             error("Failed loading data! Stopping plugin!");
             e.printStackTrace();
             Bukkit.getPluginManager().disablePlugin(this);
@@ -104,18 +107,22 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
             }
             registerListeners(new EntityDeathListener(getCoinManager(), getConfig().getConfigurationSection("mob-list"), getPluginMessageManager()), new InventoryClickListener(getCoinManager(), getGuiManager(), getPluginMessageManager()), new PlayerPreProcessCommandListener(getCoinManager(), getGuiManager()));
             info("Loaded listeners!");
-        } catch (Exception e){
+        } catch (Exception e) {
             error("Loading Listeners failed! Stopping plugin..");
             e.printStackTrace();
             Bukkit.getPluginManager().disablePlugin(this);
             return;
         }
 
-        if (!Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) warn("PlaceholderAPI was not found placeholders from this plugin will NOT work!");
+        startSaveTask(getConfig().getInt("storage.auto-save", 300));
+
+        if (!Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI"))
+            warn("PlaceholderAPI was not found placeholders from this plugin will NOT work!");
     }
 
     @Override
     public void onDisable() {
+        shutdownSaveTask();
         if (getConfig().getBoolean("bungeecord")) return;
         try {
             info("Saving data..");
@@ -126,7 +133,7 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
             try {
                 lemonMobCoins.disable();
                 info("Saved data!");
-            } catch (IOException | SQLException e1){
+            } catch (IOException | SQLException e1) {
                 error("Failed saving data again! Data will be lost ;(");
                 e.printStackTrace();
             }
@@ -134,23 +141,23 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
         info("Disabled successfully!");
     }
 
-    private void registerListeners(Listener... listeners){
+    private void registerListeners(Listener... listeners) {
         Arrays.stream(listeners).forEach(listener -> Bukkit.getPluginManager().registerEvents(listener, this));
     }
 
-    private void error(String s){
+    private void error(String s) {
         log(Level.SEVERE, s);
     }
 
-    private void warn(String s){
+    private void warn(String s) {
         log(Level.WARNING, s);
     }
 
-    private void info(String s){
+    private void info(String s) {
         log(Level.INFO, s);
     }
 
-    private void log(Level level, String s){
+    private void log(Level level, String s) {
         getLogger().log(level, s);
     }
 
@@ -168,9 +175,37 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
         return pluginMessageManager;
     }
 
+
+    public void startSaveTask(int interval) {
+        shutdownSaveTask();
+        if (interval > 0) {
+            this.saveTask = new BukkitRunnable() {
+                @Override
+                public void run() {
+                    if (getConfig().getBoolean("bungeecord")) return;
+                    try {
+                        getCoinManager().saveData();
+                    } catch (IOException | SQLException e) {
+                        error("Failed to save coins data: " + e.getLocalizedMessage());
+                        e.printStackTrace();
+                    }
+                }
+            };
+            this.saveTask.runTaskTimerAsynchronously(this, interval * 20L, interval * 20L);
+        }
+    }
+
+    public void shutdownSaveTask() {
+        if (this.saveTask != null) {
+            this.saveTask.cancel();
+            this.saveTask = null;
+        }
+    }
+
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (command.getName().equalsIgnoreCase("mobcoins") || command.getName().equalsIgnoreCase("mc") || command.getName().equalsIgnoreCase("mobc") || command.getName().equalsIgnoreCase("mcoins") || command.getName().equalsIgnoreCase("mcoin") || command.getName().equalsIgnoreCase("mobcoin")){
+        if (command.getName().equalsIgnoreCase("mobcoins") || command.getName().equalsIgnoreCase("mc") || command.getName().equalsIgnoreCase("mobc") || command.getName().equalsIgnoreCase("mcoins") || command.getName().equalsIgnoreCase("mcoin") || command.getName().equalsIgnoreCase("mobcoin")) {
             if (args.length == 0) {
                 if (sender instanceof Player) {
                     sender.sendMessage(Messages.OWN_PLAYER_BALANCE.getMessage(getCoinManager(), (Player) sender, null, 0));
@@ -179,7 +214,7 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
                 sender.sendMessage(Messages.CONSOLE_CANNOT_USE_COMMAND.getMessage(getCoinManager(), null, null, 0));
             }
 
-            if (args[0].equalsIgnoreCase("help") || args[0].equalsIgnoreCase("?")){
+            if (args[0].equalsIgnoreCase("help") || args[0].equalsIgnoreCase("?")) {
                 if (sender.hasPermission("lemonmobcoins.admin")) {
                     sender.sendMessage(Messages.ADMIN_HELP_MENU.getMessage(getCoinManager(), null, null, 0));
                     return true;
@@ -188,9 +223,9 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
                 return true;
             }
 
-            if (args[0].equalsIgnoreCase("balance") || args[0].equalsIgnoreCase("bal")){
-                if (args.length == 1){
-                    if (sender instanceof Player){
+            if (args[0].equalsIgnoreCase("balance") || args[0].equalsIgnoreCase("bal")) {
+                if (args.length == 1) {
+                    if (sender instanceof Player) {
                         Player p = (Player) sender;
                         p.sendMessage(Messages.OWN_PLAYER_BALANCE.getMessage(getCoinManager(), p, null, 0));
                         return true;
@@ -198,7 +233,7 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
                     sender.sendMessage(Messages.CONSOLE_CANNOT_USE_COMMAND.getMessage(getCoinManager(), null, null, 0));
                     return true;
                 }
-                if (args.length == 2){
+                if (args.length == 2) {
                     OfflinePlayer player = Bukkit.getOfflinePlayer(args[1]);
                     if (player == null) {
                         sender.sendMessage(Messages.UNKNOWN_PLAYER.getMessage(getCoinManager(), null, null, 0));
@@ -209,8 +244,8 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
                 }
             }
 
-            if (args[0].equalsIgnoreCase("shop")){
-                if (sender instanceof Player){
+            if (args[0].equalsIgnoreCase("shop")) {
+                if (sender instanceof Player) {
                     ((Player) sender).openInventory(getGuiManager().getInventory());
                     return true;
                 }
@@ -218,26 +253,26 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
                 return true;
             }
 
-            if (sender.hasPermission("mobcoins.admin")){
+            if (sender.hasPermission("mobcoins.admin")) {
                 if (args.length != 3) {
-                    if (args[0].equalsIgnoreCase("set") || args[0].equalsIgnoreCase("give") || args[0].equalsIgnoreCase("take")){
+                    if (args[0].equalsIgnoreCase("set") || args[0].equalsIgnoreCase("give") || args[0].equalsIgnoreCase("take")) {
                         sender.sendMessage(Messages.valueOf("INVALID_USAGE_" + args[0].toUpperCase() + "_COMMAND").getMessage(getCoinManager(), null, null, 0));
                         return true;
                     }
 
-                    if (args.length != 2){
+                    if (args.length != 2) {
                         if (args[0].equalsIgnoreCase("reset")) {
                             sender.sendMessage(Messages.INVALID_USAGE_RESET_COMMAND.getMessage(getCoinManager(), null, null, 0));
                         }
 
-                        if (args[0].equalsIgnoreCase("reload")){
+                        if (args[0].equalsIgnoreCase("reload")) {
                             try {
                                 sender.sendMessage(Messages.START_RELOAD.getMessage(getCoinManager(), null, null, 0));
                                 onDisable();
                                 onEnable();
                                 sender.sendMessage(Messages.SUCCESSFUL_RELOAD.getMessage(getCoinManager(), null, null, 0));
                                 return true;
-                            } catch (Exception e){
+                            } catch (Exception e) {
                                 sender.sendMessage(Messages.FAILED_RELOAD.getMessage(getCoinManager(), null, null, 0));
                                 return true;
                             }
@@ -255,30 +290,34 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
                     return true;
                 }
 
-                if (args[0].equalsIgnoreCase("reset")){
+                if (args[0].equalsIgnoreCase("reset")) {
                     getCoinManager().setCoinsOfPlayer(player.getUniqueId(), 0);
-                    if (getPluginMessageManager() != null) getPluginMessageManager().sendPluginMessage(player.getUniqueId(), getCoinManager().getCoinsOfPlayer(player.getUniqueId()));
+                    if (getPluginMessageManager() != null)
+                        getPluginMessageManager().sendPluginMessage(player.getUniqueId(), getCoinManager().getCoinsOfPlayer(player.getUniqueId()));
                     sender.sendMessage(Messages.RESET_PLAYER_BALANCE.getMessage(getCoinManager(), player, null, 0));
                     return true;
                 }
 
-                if (args[0].equalsIgnoreCase("set")){
+                if (args[0].equalsIgnoreCase("set")) {
                     getCoinManager().setCoinsOfPlayer(player.getUniqueId(), Double.parseDouble(args[2]));
-                    if (getPluginMessageManager() != null) getPluginMessageManager().sendPluginMessage(player.getUniqueId(), getCoinManager().getCoinsOfPlayer(player.getUniqueId()));
+                    if (getPluginMessageManager() != null)
+                        getPluginMessageManager().sendPluginMessage(player.getUniqueId(), getCoinManager().getCoinsOfPlayer(player.getUniqueId()));
                     sender.sendMessage(Messages.SET_PLAYER_BALANCE.getMessage(getCoinManager(), player, null, 0));
                     return true;
                 }
 
-                if (args[0].equalsIgnoreCase("take")){
+                if (args[0].equalsIgnoreCase("take")) {
                     getCoinManager().deductCoinsFromPlayer(player.getUniqueId(), Double.parseDouble(args[2]));
-                    if (getPluginMessageManager() != null) getPluginMessageManager().sendPluginMessage(player.getUniqueId(), getCoinManager().getCoinsOfPlayer(player.getUniqueId()));
+                    if (getPluginMessageManager() != null)
+                        getPluginMessageManager().sendPluginMessage(player.getUniqueId(), getCoinManager().getCoinsOfPlayer(player.getUniqueId()));
                     sender.sendMessage(Messages.TAKE_PLAYER_BALANCE.getMessage(getCoinManager(), player, null, Integer.valueOf(args[2])));
                     return true;
                 }
 
                 if (args[0].equalsIgnoreCase("give")) {
                     getCoinManager().addCoinsToPlayer(player.getUniqueId(), Double.parseDouble(args[2]));
-                    if (getPluginMessageManager() != null) getPluginMessageManager().sendPluginMessage(player.getUniqueId(), getCoinManager().getCoinsOfPlayer(player.getUniqueId()));
+                    if (getPluginMessageManager() != null)
+                        getPluginMessageManager().sendPluginMessage(player.getUniqueId(), getCoinManager().getCoinsOfPlayer(player.getUniqueId()));
                     sender.sendMessage(Messages.GIVE_PLAYER_BALANCE.getMessage(getCoinManager(), player, null, Integer.valueOf(args[2])));
                     return true;
                 }
@@ -288,10 +327,10 @@ public final class LemonMobCoinsBukkitPlugin extends JavaPlugin {
             return true;
         }
 
-        if (command.getName().equalsIgnoreCase("mshop")){
-            if (sender instanceof Player){
+        if (command.getName().equalsIgnoreCase("mshop")) {
+            if (sender instanceof Player) {
                 Player p = (Player) sender;
-                if (p.hasPermission("lemonmobcoins.shop")){
+                if (p.hasPermission("lemonmobcoins.shop")) {
                     p.openInventory(getGuiManager().getInventory());
                     return true;
                 }

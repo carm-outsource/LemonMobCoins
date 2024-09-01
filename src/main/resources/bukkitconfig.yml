@@ -9,6 +9,7 @@ bungeecord: false
 # The mysql section is straightforward fill everything in make sure the database exists and you are good to go
 # The plugin itself already makes a table so do not worry about this.
 storage:
+  auto-save: 600
   type: "flatfile"
   mysql:
     hostname: "localhost"
